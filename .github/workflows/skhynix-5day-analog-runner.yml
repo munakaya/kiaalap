@@ -1,0 +1,65 @@
+name: Temporary SK hynix 5-day analogue research
+
+on:
+  push:
+    branches:
+      - chatgpt/skhynix-5day-analog-runner-20260831
+    paths:
+      - .github/workflows/skhynix-5day-analog-runner.yml
+      - runner/spot_5day_analog_backtest.py.gz.b64
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/skhynix-5day-analog-runner-20260831
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas matplotlib requests yfinance
+
+      - name: Restore and validate backtest
+        run: |
+          base64 --decode runner/spot_5day_analog_backtest.py.gz.b64 | gzip --decompress > runner/spot_5day_analog_backtest.py
+          python -m py_compile runner/spot_5day_analog_backtest.py
+
+      - name: Run point-in-time research
+        run: |
+          rm -rf results
+          python runner/spot_5day_analog_backtest.py --start 2010-01-01 --output results | tee runner_stdout.json
+          cp runner/spot_5day_analog_backtest.py results/backtest.py
+          cp runner_stdout.json results/runner_stdout.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('results/summary.json').read_text())
+          print(json.dumps({
+            'data': s['data'],
+            'periods': s['periods'],
+            'verdict': s['verdict'],
+            'next_day': s['selected']['next_day'],
+            'best_horizon': s['selected']['best_horizon'],
+            'buy_and_hold': s['buy_and_hold_holdout'],
+            'latest': s['latest'],
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: skhynix-5day-analog-results-20260831
+          path: results
+          retention-days: 7
+          compression-level: 6
